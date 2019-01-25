@@ -1,0 +1,134 @@
+'
+'Example for GSM_GNSS_2 Click
+'
+'    Date          : Nov 2017.
+'    Author        : MikroE Team
+'
+'Test configuration CEC :
+'    
+'    MCU              : CEC1302
+'    Dev. Board       : Clicker 2 for CEC1302
+'    ARM Compiler ver : v6.1.0.0
+'
+'---
+'
+'Description :
+'
+'The application is composed of three sections :
+'
+'- System Initialization - Initializes all necessary GPIO pins, UART used for
+'the communcation with GSM module and UART used for infromation logging
+'- Application Initialization - Initializes driver, power on module and sends few
+'command for the default module configuration
+'- Application Task - running in parallel core state machine and and checks for call flag.
+'If call detected parser will hang up call.
+'
+'Additional Functions :
+'
+'All additional functions such as timer initialization and default handler. 
+''
+'Notes :
+'
+'- Echo must be turned off for succefull parsing. ( ATE0 )
+'- UART polling works much better with HFC enabled.
+'- In case of usage of other MCUs Timer initialization must be adjusted according to your MCU.
+'
+'
+program Click_GSM_GNSS_2_CEC
+
+include Click_GSM_GNSS_2_types
+include Click_GSM_GNSS_2_config
+include Click_GSM_GNSS_2_timer
+
+dim
+    ' COMMANDS
+    GSMGNSS2_AT as string[3]
+    GSMGNSS2_HANGUP as string[4]
+    GSMGNSS2_ECHO_OFF as string[5]
+    GSMGNSS2_FORMAT_DEFAULT as string[10]
+    GSMGNSS2_HFC_ENABLE as string[11]
+
+    ' CALLER FLAG
+    callFlag as uint8_t
+
+sub procedure gsmgnss2_default_handler(dim rsp as ^uint8_t, dim evArgs as ^uint8_t) 
+dim
+    ptr_rsp as ^char
+    
+    ptr_rsp = rsp + 2
+    
+    if ( ptr_rsp^ = 82 ) then
+        callFlag = 1
+    end if
+
+    mikrobus_logWrite( ptr_rsp - 2, _LOG_TEXT )
+    
+end sub
+
+sub procedure systemInit() 
+
+    GSMGNSS2_AT = "AT"
+    GSMGNSS2_HANGUP = "ATH"
+    GSMGNSS2_ECHO_OFF = "ATE0"
+    GSMGNSS2_FORMAT_DEFAULT = "AT+CMGF=1"
+    GSMGNSS2_HFC_ENABLE = "AT+IFC=2,2"
+
+    callFlag = 0
+
+    mikrobus_gpioInit( _MIKROBUS1, _MIKROBUS_AN_PIN, _GPIO_INPUT )
+    mikrobus_gpioInit( _MIKROBUS1, _MIKROBUS_PWM_PIN, _GPIO_INPUT )
+    mikrobus_gpioInit( _MIKROBUS1, _MIKROBUS_INT_PIN, _GPIO_INPUT )
+    mikrobus_gpioInit( _MIKROBUS1, _MIKROBUS_RST_PIN, _GPIO_OUTPUT )
+    mikrobus_gpioInit( _MIKROBUS1, _MIKROBUS_CS_PIN, _GPIO_OUTPUT )    
+
+    mikrobus_uartInit(_MIKROBUS1, @_GSMGNSS2_UART_CFG[0]) 
+    mikrobus_logInit(_MIKROBUS2, 9600) 
+
+end sub
+
+sub procedure applicationInit() 
+
+' TIMER INIT
+    gsmgnss2_configTimer()
+
+' DRIVER INIT
+    gsmgnss2_uartDriverInit(T_GSMGNSS2_P(@_MIKROBUS1_GPIO), T_GSMGNSS2_P(@_MIKROBUS1_UART)) 
+    gsmgnss2_coreInit(@gsmgnss2_default_handler, 1500)
+
+' MODULE POWER ON
+    gsmgnss2_hfcEnable(true) 
+    gsmgnss2_modulePower(true) 
+
+' MODULE INIT
+    gsmgnss2_cmdSingle(@GSMGNSS2_AT[0]) 
+    gsmgnss2_cmdSingle(@GSMGNSS2_AT[0]) 
+    gsmgnss2_cmdSingle(@GSMGNSS2_AT[0]) 
+    gsmgnss2_cmdSingle(@GSMGNSS2_ECHO_OFF[0]) 
+    gsmgnss2_cmdSingle(@GSMGNSS2_HFC_ENABLE[0]) 
+    gsmgnss2_cmdSingle(@GSMGNSS2_FORMAT_DEFAULT[0]) 
+
+end sub
+
+sub procedure applicationTask() 
+
+    gsmgnss2_process() 
+
+    if ((0 <> callFlag)) then 
+    
+        gsmgnss2_cmdSingle(@GSMGNSS2_HANGUP[0]) 
+        Delay_ms(3000) 
+
+        callFlag = 0 
+    end if
+
+end sub
+
+main :
+
+    systemInit() 
+    applicationInit() 
+    while (1) 
+        applicationTask() 
+    wend
+
+end.
